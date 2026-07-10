@@ -1,6 +1,6 @@
 # The Wedding Cam 💍
 
-A disposable camera web app for Desiree & Jude Michael's wedding.
+A disposable camera web app for newlyweds.
 
 ## Setup
 
