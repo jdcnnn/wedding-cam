@@ -105,7 +105,7 @@ export function SplashScreen({ onDone }: Props) {
           transition: "opacity 0.9s ease 1.4s, transform 0.9s ease 1.4s",
         }}
       >
-        Jude &amp; Desiree
+        Jude &amp; Des
       </h1>
 
       <div

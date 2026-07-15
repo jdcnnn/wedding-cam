@@ -597,7 +597,7 @@ export function CameraScreen({
               letterSpacing: "0.05em",
             }}
           >
-            Jude & Desiree
+            Jude & Des
           </span>
         </div>
 

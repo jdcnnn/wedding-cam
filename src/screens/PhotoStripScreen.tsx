@@ -122,7 +122,7 @@ function drawAccentRule(
 
 export function PhotoStripScreen({
   sessionId,
-  coupleNames = "Jude & Desiree",
+  coupleNames = "Jude & Des",
   eventDate,
   hashtag = "#JUDEfoundhisDEStiny",
   onDone,
