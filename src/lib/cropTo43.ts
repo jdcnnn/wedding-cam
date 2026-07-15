@@ -1,11 +1,11 @@
 export async function cropTo43(
   bitmap: ImageBitmap,
   {
-    maxLongSide = 3200,
-    maxQuality = 0.94,
-    minQuality = 0.90,
-    targetMaxBytes = 1_800_000,
-    maxResolutionSteps = 3,
+    maxLongSide = 3840,
+    maxQuality = 0.95,
+    minQuality = 0.92,
+    targetMaxBytes = 3_000_000,
+    maxResolutionSteps = 2,
     mirror = false,
   }: {
     maxLongSide?: number

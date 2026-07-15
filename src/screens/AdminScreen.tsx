@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
 interface ShotRow {
@@ -16,6 +16,7 @@ const CREAM = '#FBF8F4'
 const LAVENDER = '#C9C7EC'
 const MAUVE = '#DEC6DE'
 const BLUSH = '#F4CBD6'
+const VIEWER_ZOOM_MAX = 4
 
 export function AdminScreen() {
   const [session, setSession] = useState<any>(null)
@@ -36,6 +37,67 @@ export function AdminScreen() {
   const [downloadProgress, setDownloadProgress] = useState<{ done: number; total: number } | null>(null)
   const [viewingIndex, setViewingIndex] = useState<number | null>(null)
   const [toasts, setToasts] = useState<Toast[]>([])
+
+  // ---------- Viewer zoom + pan ----------
+  const [viewerScale, setViewerScale] = useState(1)
+  const [viewerPan, setViewerPan] = useState({ x: 0, y: 0 })
+  const viewerPinchDistRef = useRef<number | null>(null)
+  const viewerPinchScaleRef = useRef(1)
+  const viewerPanStartRef = useRef<{ x: number; y: number } | null>(null)
+  const viewerPanOriginRef = useRef({ x: 0, y: 0 })
+  const lastTapRef = useRef(0)
+
+  function resetViewerZoom() {
+    setViewerScale(1)
+    setViewerPan({ x: 0, y: 0 })
+  }
+
+  function viewerTouchStart(e: React.TouchEvent) {
+    if (e.touches.length === 2) {
+      viewerPinchDistRef.current = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      )
+      viewerPinchScaleRef.current = viewerScale
+    } else if (e.touches.length === 1) {
+      const now = Date.now()
+      if (now - lastTapRef.current < 280) {
+        setViewerScale((s) => (s > 1 ? 1 : 2.5))
+        setViewerPan({ x: 0, y: 0 })
+      }
+      lastTapRef.current = now
+      if (viewerScale > 1) {
+        viewerPanStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+        viewerPanOriginRef.current = viewerPan
+      }
+    }
+  }
+  function viewerTouchMove(e: React.TouchEvent) {
+    if (e.touches.length === 2 && viewerPinchDistRef.current) {
+      e.preventDefault()
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      )
+      const scale = Math.min(
+        VIEWER_ZOOM_MAX,
+        Math.max(1, viewerPinchScaleRef.current * (dist / viewerPinchDistRef.current)),
+      )
+      setViewerScale(scale)
+    } else if (e.touches.length === 1 && viewerPanStartRef.current && viewerScale > 1) {
+      e.preventDefault()
+      const dx = e.touches[0].clientX - viewerPanStartRef.current.x
+      const dy = e.touches[0].clientY - viewerPanStartRef.current.y
+      setViewerPan({
+        x: viewerPanOriginRef.current.x + dx,
+        y: viewerPanOriginRef.current.y + dy,
+      })
+    }
+  }
+  function viewerTouchEnd(e: React.TouchEvent) {
+    if (e.touches.length < 2) viewerPinchDistRef.current = null
+    if (e.touches.length < 1) viewerPanStartRef.current = null
+  }
 
   const pushToast = useCallback((message: string, tone: Toast['tone'] = 'success') => {
     const id = Date.now() + Math.random()
@@ -215,6 +277,7 @@ export function AdminScreen() {
 
   function openViewer(index: number) {
     setViewingIndex(index)
+    resetViewerZoom()
   }
 
   function closeViewer() {
@@ -222,6 +285,7 @@ export function AdminScreen() {
   }
 
   function showPrev() {
+    resetViewerZoom()
     setViewingIndex(prev => {
       if (prev === null) return null
       return prev > 0 ? prev - 1 : shots.length - 1
@@ -229,6 +293,7 @@ export function AdminScreen() {
   }
 
   function showNext() {
+    resetViewerZoom()
     setViewingIndex(prev => {
       if (prev === null) return null
       return prev < shots.length - 1 ? prev + 1 : 0
@@ -244,7 +309,7 @@ export function AdminScreen() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-   
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewingIndex, shots.length])
 
   const totalShots = shots.length
@@ -726,12 +791,11 @@ export function AdminScreen() {
         )}
       </div>
 
-      {/* Single shot viewer with prev/next navigation */}
+      {/* Single shot viewer with zoom + prev/next navigation */}
       {viewingShot && (
         <div
           className="fixed inset-0 z-50 flex flex-col"
-          style={{ background: 'rgba(24,20,38,0.97)' }}
-          onClick={closeViewer}
+          style={{ background: 'rgba(24,20,38,0.97)', overflow: 'hidden' }}
         >
           <button
             onClick={closeViewer}
@@ -750,7 +814,6 @@ export function AdminScreen() {
           <div
             className="flex-1 flex items-center justify-center gap-3 px-3"
             style={{ minHeight: 0 }}
-            onClick={e => e.stopPropagation()}
           >
             <button
               onClick={showPrev}
@@ -761,6 +824,7 @@ export function AdminScreen() {
                 border: '1px solid rgba(251,248,244,0.16)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 cursor: 'pointer', color: CREAM,
+                zIndex: 5,
               }}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -768,17 +832,39 @@ export function AdminScreen() {
               </svg>
             </button>
 
-            <img
-              src={viewingShot.url}
-              alt=""
+            <div
               style={{
                 maxWidth: 'calc(100% - 100px)',
                 maxHeight: '100%',
-                objectFit: 'contain',
-                borderRadius: 8,
-                boxShadow: '0 12px 44px rgba(0,0,0,0.5)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                overflow: 'hidden',
               }}
-            />
+              onTouchStart={viewerTouchStart}
+              onTouchMove={viewerTouchMove}
+              onTouchEnd={viewerTouchEnd}
+              onDoubleClick={() => {
+                setViewerScale((s) => (s > 1 ? 1 : 2.5))
+                setViewerPan({ x: 0, y: 0 })
+              }}
+            >
+              <img
+                src={viewingShot.url}
+                alt=""
+                draggable={false}
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '100%',
+                  objectFit: 'contain',
+                  borderRadius: 8,
+                  boxShadow: '0 12px 44px rgba(0,0,0,0.5)',
+                  transform: `translate(${viewerPan.x}px, ${viewerPan.y}px) scale(${viewerScale})`,
+                  transition: viewerPinchDistRef.current ? 'none' : 'transform 0.2s ease',
+                  touchAction: 'none',
+                }}
+              />
+            </div>
 
             <button
               onClick={showNext}
@@ -789,6 +875,7 @@ export function AdminScreen() {
                 border: '1px solid rgba(251,248,244,0.16)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 cursor: 'pointer', color: CREAM,
+                zIndex: 5,
               }}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -798,7 +885,6 @@ export function AdminScreen() {
           </div>
 
           <div
-            onClick={e => e.stopPropagation()}
             style={{
               flexShrink: 0,
               display: 'flex', flexDirection: 'column',

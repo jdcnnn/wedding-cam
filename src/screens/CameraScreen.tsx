@@ -21,6 +21,28 @@ const CAMERA_ACQUIRE_TIMEOUT_MS = 6000;
 const HARDWARE_RELEASE_DELAY_MS = 250;
 const FINISH_TRANSITION_MS = 700;
 const DIGITAL_ZOOM_MAX = 3;
+const VIEWER_ZOOM_MAX = 4;
+
+function navBtnStyle(side: "left" | "right"): React.CSSProperties {
+  return {
+    position: "absolute",
+    top: "50%",
+    [side]: 14,
+    transform: "translateY(-50%)",
+    width: 40,
+    height: 40,
+    borderRadius: "50%",
+    background: "rgba(251,248,244,0.1)",
+    border: "1px solid rgba(251,248,244,0.18)",
+    color: "#FBF8F4",
+    fontSize: "1.6rem",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    zIndex: 5,
+  } as React.CSSProperties;
+}
 
 export function CameraScreen({
   sessionId,
@@ -48,7 +70,6 @@ export function CameraScreen({
     <"permission" | "other" | null
   >(null);
   const [confirmDelete, setConfirmDelete] = useState<ShotRecord | null>(null);
-  const [viewingShot, setViewingShot] = useState<ShotRecord | null>(null);
   const [transitioningOut, setTransitioningOut] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -58,6 +79,95 @@ export function CameraScreen({
     step: number;
   } | null>(null);
   const [entered, setEntered] = useState(false);
+
+  // ---------- Photo viewer (zoom + prev/next) ----------
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const [viewerScale, setViewerScale] = useState(1);
+  const [viewerPan, setViewerPan] = useState({ x: 0, y: 0 });
+  const viewerPinchDistRef = useRef<number | null>(null);
+  const viewerPinchScaleRef = useRef(1);
+  const viewerPanStartRef = useRef<{ x: number; y: number } | null>(null);
+  const viewerPanOriginRef = useRef({ x: 0, y: 0 });
+  const lastTapRef = useRef(0);
+
+  const viewingShot = viewerIndex !== null ? shots[viewerIndex] : null;
+
+  function openViewer(index: number) {
+    setViewerIndex(index);
+    setViewerScale(1);
+    setViewerPan({ x: 0, y: 0 });
+  }
+  function closeViewer() {
+    setViewerIndex(null);
+  }
+  function showPrevShot() {
+    setViewerScale(1);
+    setViewerPan({ x: 0, y: 0 });
+    setViewerIndex((i) =>
+      i === null ? null : i > 0 ? i - 1 : shots.length - 1,
+    );
+  }
+  function showNextShot() {
+    setViewerScale(1);
+    setViewerPan({ x: 0, y: 0 });
+    setViewerIndex((i) =>
+      i === null ? null : i < shots.length - 1 ? i + 1 : 0,
+    );
+  }
+
+  function viewerTouchStart(e: React.TouchEvent) {
+    if (e.touches.length === 2) {
+      viewerPinchDistRef.current = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      );
+      viewerPinchScaleRef.current = viewerScale;
+    } else if (e.touches.length === 1) {
+      const now = Date.now();
+      if (now - lastTapRef.current < 280) {
+        setViewerScale((s) => (s > 1 ? 1 : 2.5));
+        setViewerPan({ x: 0, y: 0 });
+      }
+      lastTapRef.current = now;
+      if (viewerScale > 1) {
+        viewerPanStartRef.current = {
+          x: e.touches[0].clientX,
+          y: e.touches[0].clientY,
+        };
+        viewerPanOriginRef.current = viewerPan;
+      }
+    }
+  }
+  function viewerTouchMove(e: React.TouchEvent) {
+    if (e.touches.length === 2 && viewerPinchDistRef.current) {
+      e.preventDefault();
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      );
+      const scale = Math.min(
+        VIEWER_ZOOM_MAX,
+        Math.max(1, viewerPinchScaleRef.current * (dist / viewerPinchDistRef.current)),
+      );
+      setViewerScale(scale);
+    } else if (
+      e.touches.length === 1 &&
+      viewerPanStartRef.current &&
+      viewerScale > 1
+    ) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - viewerPanStartRef.current.x;
+      const dy = e.touches[0].clientY - viewerPanStartRef.current.y;
+      setViewerPan({
+        x: viewerPanOriginRef.current.x + dx,
+        y: viewerPanOriginRef.current.y + dy,
+      });
+    }
+  }
+  function viewerTouchEnd(e: React.TouchEvent) {
+    if (e.touches.length < 2) viewerPinchDistRef.current = null;
+    if (e.touches.length < 1) viewerPanStartRef.current = null;
+  }
 
   const usingDigitalZoom = !zoomCapabilities;
 
@@ -81,8 +191,8 @@ export function CameraScreen({
   const constraintsFor = (): MediaStreamConstraints => ({
     video: {
       facingMode: { ideal: "environment" },
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
+      width: { ideal: 2560 },
+      height: { ideal: 1440 },
     },
     audio: false,
   });
@@ -361,8 +471,6 @@ export function CameraScreen({
       onShot();
 
       if (newCount >= MAX_SHOTS) {
-        // Roll is full — let the guest review their shots before
-        // finishing instead of auto-transitioning away immediately.
         setShowPreview(true);
       }
     } catch (err) {
@@ -930,7 +1038,7 @@ export function CameraScreen({
                 gap: 6,
               }}
             >
-              {shots.map((shot) => (
+              {shots.map((shot, index) => (
                 <div
                   key={shot.id}
                   style={{ position: "relative", aspectRatio: "3/4" }}
@@ -939,7 +1047,7 @@ export function CameraScreen({
                     src={shot.localUrl}
                     alt=""
                     loading="lazy"
-                    onClick={() => setViewingShot(shot)}
+                    onClick={() => openViewer(index)}
                     style={{
                       width: "100%",
                       height: "100%",
@@ -1012,21 +1120,55 @@ export function CameraScreen({
       {viewingShot && (
         <div
           className="absolute inset-0 z-50 flex items-center justify-center"
-          style={{ background: "rgba(15,13,20,0.97)" }}
-          onClick={() => setViewingShot(null)}
+          style={{ background: "rgba(15,13,20,0.97)", overflow: "hidden" }}
         >
-          <img
-            src={viewingShot.localUrl}
-            alt=""
+          <div
             style={{
-              maxWidth: "90%",
-              maxHeight: "85%",
-              objectFit: "contain",
-              borderRadius: 8,
+              width: "100%",
+              height: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
-          />
+            onTouchStart={viewerTouchStart}
+            onTouchMove={viewerTouchMove}
+            onTouchEnd={viewerTouchEnd}
+            onDoubleClick={() => {
+              setViewerScale((s) => (s > 1 ? 1 : 2.5));
+              setViewerPan({ x: 0, y: 0 });
+            }}
+          >
+            <img
+              src={viewingShot.localUrl}
+              alt=""
+              draggable={false}
+              style={{
+                maxWidth: "90%",
+                maxHeight: "85%",
+                objectFit: "contain",
+                borderRadius: 8,
+                transform: `translate(${viewerPan.x}px, ${viewerPan.y}px) scale(${viewerScale})`,
+                transition: viewerPinchDistRef.current
+                  ? "none"
+                  : "transform 0.2s ease",
+                touchAction: "none",
+              }}
+            />
+          </div>
+
+          {shots.length > 1 && (
+            <>
+              <button onClick={showPrevShot} style={navBtnStyle("left")}>
+                ‹
+              </button>
+              <button onClick={showNextShot} style={navBtnStyle("right")}>
+                ›
+              </button>
+            </>
+          )}
+
           <button
-            onClick={() => setViewingShot(null)}
+            onClick={closeViewer}
             style={{
               position: "absolute",
               top: 20,
@@ -1036,6 +1178,7 @@ export function CameraScreen({
               background: "none",
               border: "none",
               cursor: "pointer",
+              zIndex: 5,
             }}
           >
             ✕
